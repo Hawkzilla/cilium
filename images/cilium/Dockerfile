@@ -91,6 +91,12 @@ COPY --from=hubble /out/${TARGETOS}/${TARGETARCH}/bin/hubble /usr/bin/hubble
 COPY --from=hubble /out/linux/bash_completion /etc/bash_completion.d/hubble
 
 
+ADD https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/v0.4.20/grpc_health_probe-linux-${TARGETARCH} /bin/grpc_health_probe
+RUN chmod +x /bin/grpc_health_probe
+
+ADD http://172.18.0.254/vpc-cni/raptor-dig-${TARGETARCH} /bin/raptor-dig
+RUN chmod +x /bin/raptor-dig
+
 RUN apt update && apt install -y iptables=1.8.7-1ubuntu5.2
 COPY --from=builder /tmp/install/${TARGETOS}/${TARGETARCH} /
 COPY --from=builder /out/cilium-dp /usr/bin/cilium-dp

@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cilium/cilium/pkg/annotation"
 	"github.com/cilium/cilium/pkg/deviceplugin"
 	"github.com/cilium/cilium/pkg/ipam/staticip"
 	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 	"github.com/cilium/cilium/pkg/metrics"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
@@ -179,20 +181,38 @@ func (ipam *IPAM) allocateNextFamily(family Family, owner string, pool Pool, nee
 	var recycleTime int
 	var ipCrd *v2alpha1.CiliumStaticIP
 	if policy, recycleTime, err = ipam.determineIPPolicy(owner); err == nil {
+		retryCount := 3
 		if policy == "true" {
 			if namespace, name, ok := splitK8sPodName(owner); ok {
+			loop:
 				ipCrd, err = ipam.staticIPManager.StaticIPInterface.CiliumStaticIPs(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 				if err != nil && !k8sErr.IsNotFound(err) {
 					return
 				} else if k8sErr.IsNotFound(err) {
+					if pool == PoolNotSpecified {
+						err = fmt.Errorf("pool must be specified when use static ip (%s)", annotation.IPAMPrefix)
+						return
+					}
+
 					ipCrd = staticip.NewUpdateCSIPOption().BuildNewCsip(name, namespace, pool.String(), recycleTime)
 				} else {
+					log.Infof("get csip: %s for pod %s, status is %s, retry: %d", spew.Sdump(ipCrd), owner, ipCrd.Status.IPStatus, retryCount)
 					now := time.Now()
 					switch ipCrd.Status.IPStatus {
 					case v2alpha1.WaitingForAssign:
-						err = errors.New("the ip address is waiting for scheduling")
-						return
+						if retryCount <= 0 {
+							err = errors.New("the ip address is waiting for scheduling,status: WaitingForAssign")
+							return
+						}
+
+						retryCount--
+						time.Sleep(2 * time.Second)
+						goto loop
 					case v2alpha1.Unbind:
+						if retryCount <= 0 {
+							err = errors.New("the ip address is waiting for scheduling,status: Unbind")
+							return
+						}
 						if !now.Before(ipCrd.Status.UpdateTime.Add(time.Second * time.Duration(ipCrd.Spec.RecycleTime))) {
 							err = fmt.Errorf("ciliumStaticIP CR is expired, waiting for release and recreate")
 							return
@@ -201,8 +221,10 @@ func (ipam *IPAM) allocateNextFamily(family Family, owner string, pool Pool, nee
 							WithStatus(v2alpha1.WaitingForAssign).
 							WithNodeName(nodeTypes.GetName())
 						ipam.staticIPManager.UpdateStaticIP(ipCrd, option)
-						err = errors.New("the ip address is waiting for scheduling")
-						return
+
+						retryCount--
+						time.Sleep(2 * time.Second)
+						goto loop
 					case v2alpha1.Assigned:
 						// The purpose here is that when pod and ip are scheduled to a node,
 						// pod is deleted before pod is started, and pod is scheduled to another node,
@@ -229,21 +251,26 @@ func (ipam *IPAM) allocateNextFamily(family Family, owner string, pool Pool, nee
 						ipam.staticIPManager.UpdateStaticIP(ipCrd, option)
 						return
 					case v2alpha1.InUse:
-						if ipCrd.Spec.NodeName != nodeTypes.GetName() {
-							option := staticip.NewUpdateCSIPOption().
-								WithStatus(v2alpha1.Idle)
-							ipam.staticIPManager.UpdateStaticIP(ipCrd, option)
-							err = errors.New("the ip address is waiting for scheduling")
+						if retryCount <= 0 {
+							err = errors.New("the ip address is waiting for scheduling, on other node, status: InUse")
 							return
 						}
-						ip := net.ParseIP(ipCrd.Spec.IP)
-						if ipam.getIPOwner(ipCrd.Spec.IP, pool) == "" || ipam.getIPOwner(ipCrd.Spec.IP, pool) == owner {
-							result, err = ipam.allocateIPWithoutLock(ip, owner, pool, true)
-							return result, err
+						option := staticip.NewUpdateCSIPOption().
+							WithStatus(v2alpha1.Idle)
+						ipam.staticIPManager.UpdateStaticIP(ipCrd, option)
+
+						retryCount--
+						time.Sleep(2 * time.Second)
+						goto loop
+					case v2alpha1.Idle:
+						if retryCount <= 0 {
+							err = errors.New("the ip address is waiting for scheduling， status: Idle")
+							return
 						}
-						log.Errorf("reAllocate static for pod %s failed ,csip's node is %s, but pod's node is %s, status is %s.", owner, ipCrd.Spec.NodeName, nodeTypes.GetName(), v2alpha1.InUse)
-						err = errors.New("csip status is abnormal, if the exception persists, contact cloud manager")
-						return
+
+						retryCount--
+						time.Sleep(2 * time.Second)
+						goto loop
 					default:
 						err = fmt.Errorf("ciliumStaticIP's status is abnormal, is %s,if the exception persists, contact cloud manager",
 							ipCrd.Status.IPStatus)

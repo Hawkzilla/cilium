@@ -16,6 +16,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	v2 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -57,7 +59,6 @@ func (res *Resource) SetIPCount(count int) {
 
 // ENIIPDevicePlugin implements the Kubelet device plugin API
 type ENIIPDevicePlugin struct {
-	oldProject  string
 	project     string
 	server      *grpc.Server
 	res         *Resource
@@ -79,24 +80,28 @@ func NewENIIPDevicePlugin(client *ClientSet, res *Resource) *ENIIPDevicePlugin {
 
 // Serve starts the device plugin and watches for Kubelet events
 func (p *ENIIPDevicePlugin) Serve(ctx context.Context) error {
+
+	if err := p.restart(); err != nil {
+		return err
+	}
+
 	go p.dpHealthChecker(ctx)
 	return p.watchKubeletLoop(ctx)
 }
 
 // getEndpoint returns the socket path for the current project
 func (p *ENIIPDevicePlugin) getEndpoint() string {
-	return path.Join(pluginapi.DevicePluginPath, fmt.Sprintf("eni-ip-%s.sock", p.project))
-}
-
-// getOldEndpoint returns the socket path for the old project (before label change)
-func (p *ENIIPDevicePlugin) getOldEndpoint() string {
-	return path.Join(pluginapi.DevicePluginPath, fmt.Sprintf("eni-ip-%s.sock", p.oldProject))
+	return path.Join(pluginapi.DevicePluginPath, fmt.Sprintf("eni-ip.sock"))
 }
 
 // startAndRegister starts the gRPC server and registers it with Kubelet
 func (p *ENIIPDevicePlugin) startAndRegister() error {
 	if err := p.start(); err != nil {
 		return fmt.Errorf("device plugin start failed: %w", err)
+	}
+
+	if p.project == "" {
+		return nil
 	}
 
 	retryCount := 5
@@ -127,6 +132,11 @@ func (p *ENIIPDevicePlugin) start() error {
 	}
 
 	p.server = grpc.NewServer()
+
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(p.server, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
 	pluginapi.RegisterDevicePluginServer(p.server, p)
 
 	go func() {
@@ -154,13 +164,6 @@ func (p *ENIIPDevicePlugin) restart() error {
 	}
 	if p.cancel != nil {
 		p.cancel()
-	}
-
-	if p.oldProject != "" {
-		if err := os.Remove(p.getOldEndpoint()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		p.oldProject = ""
 	}
 
 	p.ctx, p.cancel = context.WithCancel(context.Background())
@@ -214,11 +217,11 @@ func (p *ENIIPDevicePlugin) watchKubeletLoop(ctx context.Context) error {
 				log.Infof("Project label unchanged, still %s", p.project)
 				continue
 			}
-			p.oldProject = p.project
+			oldProject := p.project
 			p.project = newProject
 			if err := p.restart(); err == nil {
 				log.Infof("Project label changed (%s -> %s), restarted device plugin",
-					p.oldProject, newProject)
+					oldProject, newProject)
 			} else {
 				log.Fatal("Failed to restart device plugin: ", err)
 			}
@@ -372,7 +375,8 @@ func (p *ENIIPDevicePlugin) checkHealth() error {
 
 	for i := 0; i < 10; i++ {
 		// Check if gRPC server is up
-		if _, err := dialUnix(p.getEndpoint()); err == nil {
+		if conn, err := dialUnix(p.getEndpoint()); err == nil {
+			conn.Close()
 			nodeName := os.Getenv(constants.EnvNodeNameSpec)
 			node, err := p.client.K8sClient.CoreV1().Nodes().Get(context.TODO(), nodeName, v1.GetOptions{})
 			if err != nil {

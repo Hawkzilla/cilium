@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	operatorOption "github.com/cilium/cilium/operator/option"
 	"math"
 	"math/rand"
 	"net"
@@ -20,34 +19,34 @@ import (
 	"sync/atomic"
 	"time"
 
+	operatorOption "github.com/cilium/cilium/operator/option"
+	"github.com/cilium/cilium/pkg/api/helpers"
+	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/ipam"
+	ipamTypes "github.com/cilium/cilium/pkg/ipam/types"
 	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/openstack/utils"
+	eniTypes "github.com/cilium/cilium/pkg/openstack/eni/types"
+	"github.com/cilium/cilium/pkg/openstack/types"
 	"github.com/cilium/cilium/pkg/trigger"
+
+	"github.com/gophercloud/gophercloud"
+	"github.com/gophercloud/gophercloud/openstack"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/attachinterfaces"
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/availabilityzones"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/attributestags"
-	"github.com/gophercloud/gophercloud/pagination"
-	"golang.org/x/sync/semaphore"
-
-	"github.com/cilium/cilium/pkg/cidr"
-	ipamTypes "github.com/cilium/cilium/pkg/ipam/types"
-	eniTypes "github.com/cilium/cilium/pkg/openstack/eni/types"
-	"github.com/cilium/cilium/pkg/openstack/types"
-	"github.com/gophercloud/gophercloud"
-	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/networkipavailabilities"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/security/groups"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/ports"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/subnets"
+	"github.com/gophercloud/gophercloud/pagination"
 
+	"golang.org/x/sync/semaphore"
 	"k8s.io/apimachinery/pkg/util/wait"
-
-	"github.com/cilium/cilium/pkg/api/helpers"
 )
 
 var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "ipam-openstack-operator")
@@ -227,10 +226,6 @@ func NewClient(metrics MetricsAPI, rateLimit float64, burst int, filters map[str
 		filters:               filters,
 		syncAvailablePoolTime: time.Time{},
 		available:             map[string]*poolAvailable{},
-	}
-
-	if err != nil {
-		return nil, err
 	}
 
 	go func() {
@@ -1298,21 +1293,28 @@ func (c *Client) FillingAvailablePool() {
 			}
 			go func(cpip *v2alpha1.CiliumPodIPPool) {
 				defer sem.Release(1)
-				// portCntFromNeutron indicates the number of existing ports belongs to the subnet
-				portCntFromNeutron, err := c.getPortCountBySubnetId(cpip.Spec.SubnetId, cpip.Spec.VPCId)
-				if err != nil {
-					log.Errorf("##### error occurred while get pool %s ports count from neutron: %s.", cpip.Name, err)
-					return
-				}
 
-				maxIps := 0
+				totalIPs := 0
 				availableIps := 0
 				if available, exist := c.available[cpip.Name]; exist {
 					availableIps = available.size()
 				}
 
-				if maxIps, err = utils.GetMaxIpsFromCIDR(cpip.Spec.CIDR); err != nil {
-					log.Errorf("##### error occurred while parse cidr from cpip %s.", cpip.Name)
+				netAvail, err := networkipavailabilities.Get(c.neutronV2, cpip.Spec.VPCId).Extract()
+				if err != nil {
+					log.Warnf("Failed to get network IP availability for network %s: %v", cpip.Spec.VPCId, err)
+					return
+				}
+
+				totalIPs, err = strconv.Atoi(netAvail.TotalIPs)
+				if err != nil {
+					log.Errorf("##### can not convert total ip %s to int for cpip %s, error is %s.", netAvail.TotalIPs, cpip.Name, err)
+					return
+				}
+
+				usedIPs, err := strconv.Atoi(netAvail.UsedIPs)
+				if err != nil {
+					log.Errorf("##### can not convert used ip %s to int for cpip %s, error is %s.", netAvail.UsedIPs, cpip.Name, err)
 					return
 				}
 
@@ -1322,9 +1324,10 @@ func (c *Client) FillingAvailablePool() {
 					return
 				}
 
-				expectedCnt := int(math.Floor(float64(maxIps) * waterMark))
+				expectedCnt := int(math.Floor(float64(totalIPs) * waterMark))
+				createCount := expectedCnt - usedIPs
 
-				createCount := expectedCnt - portCntFromNeutron
+				log.Infof("##### get network %s total ip is %d for cpip %s.", cpip.Spec.VPCId, totalIPs, cpip.Name)
 
 				var maxFreePort int
 				if cpip.Spec.MaxFreePort == 0 {
@@ -1341,7 +1344,7 @@ func (c *Client) FillingAvailablePool() {
 					cpip.Name, createCount, expectedCnt, availableIps)
 
 				if createCount <= 0 {
-					if expectedCnt == portCntFromNeutron {
+					if expectedCnt == createCount {
 						err = ipam.UpdateCiliumIPPoolStatus(cpip.Name, nil, -1, true, nil)
 						if err != nil {
 							log.Errorf("update ciliumPodIPPool %s failed, error is %s.", cpip.Name, err)

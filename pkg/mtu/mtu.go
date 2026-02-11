@@ -19,7 +19,7 @@ const (
 
 	// EthernetMTU is the standard MTU for Ethernet devices. It is used
 	// as the MTU for container devices when running direct routing mode.
-	EthernetMTU = 1500
+	EthernetMTU = 1450
 
 	// TunnelOverhead is an approximation for bytes used for tunnel
 	// encapsulation. It accounts for:

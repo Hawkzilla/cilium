@@ -19,7 +19,7 @@ ARG NOSTRIP
 ARG NOOPT
 ARG LOCKDEBUG
 ARG RACE
-ARG OPERATOR_VARIANT
+ARG OPERATOR_VARIANT=openstack
 
 WORKDIR /go/src/github.com/cilium/cilium
 
@@ -60,7 +60,7 @@ FROM ${BASE_IMAGE} as release
 ARG TARGETOS
 # TARGETARCH is an automatic platform ARG enabled by Docker BuildKit.
 ARG TARGETARCH
-ARG OPERATOR_VARIANT
+ARG OPERATOR_VARIANT=openstack
 LABEL maintainer="maintainer@cilium.io"
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=gops /out/${TARGETOS}/${TARGETARCH}/bin/gops /bin/gops
@@ -85,7 +85,7 @@ FROM release as debug
 ARG TARGETOS
 # TARGETARCH is an automatic platform ARG enabled by Docker BuildKit.
 ARG TARGETARCH
-ARG OPERATOR_VARIANT
+ARG OPERATOR_VARIANT=openstack
 ARG DEBUG_HOLD
 ENV DEBUG_PORT=2346
 ENV DEBUG_HOLD=${DEBUG_HOLD}

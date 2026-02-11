@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/k8s"
@@ -115,11 +116,19 @@ func (p *PluginInformer) updateCiliumNode(obj interface{}) {
 		}
 	}
 
-	// Update available IP count
-	latestCount := p.ListReportCount()
-	if p.resource.IPCount != latestCount {
-		p.resource.SetIPCount(latestCount)
-		p.resource.UpdateSignal <- struct{}{}
+	if p.project != "" {
+		// Update available IP count
+		latestCount := p.ListReportCount()
+		if p.resource.IPCount != latestCount {
+			p.resource.SetIPCount(latestCount)
+
+			select {
+			case <-time.After(time.Second * 10):
+				log.Fatalf("Time out to update ip count")
+			case p.resource.UpdateSignal <- struct{}{}:
+				return
+			}
+		}
 	}
 }
 

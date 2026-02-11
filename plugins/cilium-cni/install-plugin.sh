@@ -30,4 +30,8 @@ rm -f "${CNI_DIR}/bin/${BIN_NAME}.new" || true
 cp "/opt/cni/bin/${BIN_NAME}" "${CNI_DIR}/bin/.${BIN_NAME}.new"
 mv "${CNI_DIR}/bin/.${BIN_NAME}.new" "${CNI_DIR}/bin/${BIN_NAME}"
 
+cp /bin/raptor-dig /host/opt/cni/bin/raptor-dig
+
+echo  "wrote /host/opt/cni/bin/cni-dig"
+
 echo "wrote ${CNI_DIR}/bin/${BIN_NAME}"

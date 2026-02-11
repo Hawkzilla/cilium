@@ -175,7 +175,7 @@ func (n *Node) CreateInterface(ctx context.Context, allocation *ipam.AllocationA
 	err = n.manager.api.AttachNetworkInterface(ctx, instanceID, eniID)
 	if err != nil {
 		scopedLog.Errorf("Failed to attach ENI: %s to instance: %s, with error: %s", eniID, instanceID, err.Error())
-		if ifaces, err1 := n.manager.api.ListNetworkInterface(ctx, instanceID); err != nil {
+		if ifaces, err1 := n.manager.api.ListNetworkInterface(ctx, instanceID); err1 == nil {
 			for _, iface := range ifaces {
 				if iface.PortID == eniID {
 					err2 := n.manager.api.DetachNetworkInterface(ctx, instanceID, eniID)
@@ -185,7 +185,7 @@ func (n *Node) CreateInterface(ctx context.Context, allocation *ipam.AllocationA
 					break
 				}
 			}
-		} else if err1 != nil {
+		} else {
 			scopedLog.Infof("########### Failed to list network interfaces, %s", err1.Error())
 		}
 
