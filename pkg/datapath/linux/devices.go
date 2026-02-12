@@ -251,6 +251,12 @@ func (dm *DeviceManager) isViableDevice(l3DevOK, hasDefaultRoute bool, link netl
 		}
 	}
 
+	if addrs, err := netlink.AddrList(link, netlink.FAMILY_V4); err != nil || len(addrs) == 0 {
+		log.WithError(err).WithField(logfields.Device, name).
+			Warn("Skipping device as it has no addresses")
+		return false
+	}
+
 	return true
 }
 
@@ -308,6 +314,7 @@ func (dm *DeviceManager) updateDevicesFromRoutes(l3DevOK bool, routes []netlink.
 
 		viable := dm.isViableDevice(l3DevOK, info.hasDefaultRoute, link)
 		if viable {
+			log.WithField(logfields.Device, name).Info("Adding device")
 			dm.devices[name] = struct{}{}
 			changed = true
 		} else {
