@@ -21,6 +21,9 @@ static int BPF_FUNC(redirect_neigh, int ifindex, struct bpf_redir_neigh *params,
 static int BPF_FUNC(redirect_peer, int ifindex, __u32 flags);
 static int BPF_FUNC(clone_redirect, struct __sk_buff *skb, __u32 ifindex, __u64 flags);
 
+static int BPF_FUNC(skb_vlan_push, struct __sk_buff *skb, __u16 vlan_proto, __u16 vlan_tci);
+static int BPF_FUNC(skb_vlan_pop, struct __sk_buff *skb);
+
 /* Packet manipulation */
 static int BPF_FUNC(skb_load_bytes, struct __sk_buff *skb, __u32 off,
 		    void *to, __u32 len);
