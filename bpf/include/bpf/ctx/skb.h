@@ -53,6 +53,10 @@
 
 #define ctx_event_output	skb_event_output
 
+#define ctx_vlan_push    skb_vlan_push
+
+#define ctx_vlan_pop     skb_vlan_pop
+
 #define ctx_adjust_meta		({ -ENOTSUPP; })
 
 /* Avoid expensive calls into the kernel flow dissector if it's not an L4
