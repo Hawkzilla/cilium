@@ -636,6 +636,19 @@ func (dc *devicesController) isSelectedDevice(d *tables.Device, txn statedb.Writ
 		return false, "device has no addresses"
 	}
 
+	onlyIPv6 := true
+	// judge if only has ipv6
+	for _, addr := range d.Addrs {
+		if addr.Addr.Is4() {
+			onlyIPv6 = false
+			break
+		}
+	}
+
+	if onlyIPv6 {
+		return false, "device has only IPv6 addresses"
+	}
+
 	// Skip devices that don't have the required flags set.
 	if d.RawFlags&requiredIfFlagsMask == 0 {
 		return false, fmt.Sprintf("missing required flag (mask=0x%x, flags=0x%x)", requiredIfFlagsMask, d.RawFlags)
