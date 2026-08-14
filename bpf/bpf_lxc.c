@@ -1148,6 +1148,9 @@ ipv4_forward_to_destination(struct __ctx_buff *ctx, struct iphdr *ip4,
 	union macaddr __maybe_unused router_mac = CONFIG(interface_mac);
 	struct remote_endpoint_info __maybe_unused fake_info = {0};
 	int ret;
+    __u16 nat_port = 0;
+    struct ipv4_ct_tuple tmp;
+
 
 #ifdef ENABLE_SRV6
 	{
@@ -1337,6 +1340,14 @@ skip_vtep:
 		}
 	}
 #endif /* TUNNEL_MODE */
+
+    if (ct_status == CT_REPLY) {
+        tmp = *tuple;
+        if (ct_has_nodeport_egress_entry4(get_ct_map4(&tmp), &tmp, &nat_port, false))
+        return tail_call_internal(ctx, CILIUM_CALL_IPV4_NODEPORT_REVNAT,
+                  ext_err);
+
+    }
 
 	if (is_defined(ENABLE_HOST_ROUTING)) {
 		int oif = 0;
