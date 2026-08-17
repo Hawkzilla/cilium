@@ -684,6 +684,8 @@ ipv6_forward_to_destination(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 {
 	union macaddr __maybe_unused router_mac = CONFIG(interface_mac);
 	int ret;
+	__u16 nat_port = 0;
+    struct ipv6_ct_tuple tmp;
 
 #ifdef ENABLE_SRV6
 	{
@@ -793,6 +795,13 @@ ipv6_forward_to_destination(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 						      bpf_htons(ETH_P_IPV6));
 	}
 #endif
+    if (ct_status == CT_REPLY) {
+        tmp = *tuple;
+        if (ct_has_nodeport_egress_entry6(get_ct_map6(&tmp), &tmp, &nat_port, false))
+        return tail_call_internal(ctx, CILIUM_CALL_IPV6_NODEPORT_REVNAT_EGRESS,
+                  ext_err);
+
+    }
 	if (is_defined(ENABLE_HOST_ROUTING)) {
 		int oif = 0;
 
