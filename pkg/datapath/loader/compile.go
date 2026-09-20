@@ -61,6 +61,10 @@ const (
 	overlayPrefix = "bpf_overlay"
 	overlayProg   = overlayPrefix + "." + string(outputSource)
 	overlayObj    = overlayPrefix + ".o"
+
+	raptorPrefix = "bpf_raptor"
+	raptorProg   = raptorPrefix + "." + string(outputSource)
+	raptorObj    = raptorPrefix + ".o"
 )
 
 var (
@@ -412,6 +416,40 @@ func compileOverlay(ctx context.Context, opts []string) error {
 	prog := &progInfo{
 		Source:     overlayProg,
 		Output:     overlayObj,
+		OutputType: outputObject,
+		Options:    opts,
+	}
+	// Write out assembly and preprocessing files for debugging purposes
+	if _, err := compile(ctx, prog, dirs); err != nil {
+		scopedLog.WithField(logfields.Params, logfields.Repr(prog)).
+			WithError(err).Warn("Failed to compile")
+		return err
+	}
+	return nil
+}
+
+// compileRaptor compiles BPF programs in bpf_raptor.c.
+func compileRaptor(ctx context.Context, opts []string) error {
+	dirs := &directoryInfo{
+		Library: option.Config.BpfDir,
+		Runtime: option.Config.StateDir,
+		Output:  option.Config.StateDir,
+		State:   option.Config.StateDir,
+	}
+	scopedLog := log.WithField(logfields.Debug, true)
+
+	versionCmd := exec.CommandContext(ctx, compiler, "--version")
+	compilerVersion, err := versionCmd.CombinedOutput(scopedLog, true)
+	if err != nil {
+		return err
+	}
+	scopedLog.WithFields(logrus.Fields{
+		compiler: string(compilerVersion),
+	}).Debug("Compiling raptor programs")
+
+	prog := &progInfo{
+		Source:     raptorProg,
+		Output:     raptorObj,
 		OutputType: outputObject,
 		Options:    opts,
 	}

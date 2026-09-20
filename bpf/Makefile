@@ -6,7 +6,7 @@ include ../Makefile.defs
 .PHONY: all bpf_all build_all subdirs install clean gen_compile_commands
 
 SUBDIRS = custom
-BPF_SIMPLE = bpf_network.o bpf_alignchecker.o
+BPF_SIMPLE = bpf_network.o bpf_alignchecker.o bpf_raptor.o
 BPF_SIMPLE_LL = $(patsubst %.o,%.ll,${BPF_SIMPLE})
 BPF = bpf_lxc.o bpf_overlay.o bpf_sock.o bpf_host.o bpf_xdp.o $(BPF_SIMPLE)
 

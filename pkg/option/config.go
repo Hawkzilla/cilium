@@ -1203,6 +1203,9 @@ const (
 
 	// EnableK8sNetworkPolicy enables support for K8s NetworkPolicy.
 	EnableK8sNetworkPolicy = "enable-k8s-networkpolicy"
+
+	// EnableRaptor enables support for Raptor vpc-cni
+	EnableRaptor = "enable-raptor"
 )
 
 // Default string arguments
@@ -1739,6 +1742,9 @@ type DaemonConfig struct {
 
 	// EnableIPSec is true when IPSec is enabled
 	EnableIPSec bool
+
+	// EnableRaptor is the option to enable raptor
+	EnableRaptor bool
 
 	// IPSec key file for stored keys
 	IPSecKeyFile string
@@ -3244,6 +3250,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnablePMTUDiscovery = vp.GetBool(EnablePMTUDiscovery)
 	c.IPv6NAT46x64CIDR = defaults.IPv6NAT46x64CIDR
 	c.IPAMCiliumNodeUpdateRate = vp.GetDuration(IPAMCiliumNodeUpdateRate)
+	c.EnableRaptor = vp.GetBool(EnableRaptor)
 
 	c.populateLoadBalancerSettings(vp)
 	c.populateDevices(vp)

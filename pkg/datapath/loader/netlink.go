@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/inctimer"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/mac"
 	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/option"
@@ -234,6 +236,133 @@ func replaceDatapath(ctx context.Context, ifName, objPath string, progs []progDe
 	return finalize, nil
 }
 
+// pinMaps creates and pins the maps from the eBPF ELF at objPath into bpffs,
+// without loading or attaching any programs. Useful when only the maps of a
+// datapath ELF need to be (re)created, e.g. to share them with programs that
+// are loaded separately.
+//
+// progs is used to validate that the expected programs are present in the ELF.
+//
+// Like replaceDatapath, when successful, returns a finalizer to allow the map
+// cleanup operation to be deferred by the caller. On error, any maps pending
+// migration are immediately re-pinned to their original paths and a finalizer
+// is not returned.
+func pinMaps(ctx context.Context, objPath string, progs []progDefinition) (_ func(), err error) {
+	// Avoid unnecessarily creating maps.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	l := log.WithField("objPath", objPath)
+
+	// Load the ELF from disk.
+	l.Debug("Loading CollectionSpec from ELF")
+	spec, err := bpf.LoadCollectionSpec(objPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading eBPF ELF: %w", err)
+	}
+
+	revert := func() {
+		// Map creation unsuccessful, revert bpffs migration.
+		l.Debug("Reverting bpffs map migration")
+		if err := bpf.FinalizeBPFFSMigration(bpf.TCGlobalsPath(), spec, true); err != nil {
+			l.WithError(err).Error("Failed to revert bpffs map migration")
+		}
+	}
+
+	for _, prog := range progs {
+		if spec.Programs[prog.progName] == nil {
+			return nil, fmt.Errorf("no program %s found in eBPF ELF", prog.progName)
+		}
+	}
+
+	// Unconditionally repin cilium_calls_* maps to prevent them from being
+	// repopulated by the loader.
+	for key, ms := range spec.Maps {
+		if !strings.HasPrefix(ms.Name, "cilium_calls_") {
+			continue
+		}
+
+		if err := bpf.RepinMap(bpf.TCGlobalsPath(), key, ms); err != nil {
+			return nil, fmt.Errorf("repinning map %s: %w", key, err)
+		}
+
+		defer func() {
+			revert := false
+			// This captures named return variable err.
+			if err != nil {
+				revert = true
+			}
+
+			if err := bpf.FinalizeMap(bpf.TCGlobalsPath(), key, revert); err != nil {
+				l.WithError(err).Error("Could not finalize map")
+			}
+		}()
+
+		// Only one cilium_calls_* per collection, we can stop here.
+		break
+	}
+
+	// Create the maps in the kernel, picking up any pinned maps from bpffs in
+	// the process and pinning newly created ones.
+	pinAll := func() error {
+		for key, ms := range spec.Maps {
+			// Skip maps not meant to be pinned, e.g. .data/.rodata/.bss. Also
+			// takes care of only acting on maps shared via bpffs.
+			if ms.Pinning != ebpf.PinByName {
+				continue
+			}
+
+			// Drop map contents: they hold references to programs and inner
+			// maps which can only be resolved when loading a full Collection.
+			// pinMaps only ensures the maps themselves are created and pinned.
+			ms.Contents = nil
+
+			m, err := ebpf.NewMapWithOptions(ms, ebpf.MapOptions{PinPath: bpf.TCGlobalsPath()})
+			if err != nil {
+				return fmt.Errorf("map %s: %w", key, err)
+			}
+
+			// The pin keeps the map alive beyond the lifetime of our FD.
+			if err := m.Close(); err != nil {
+				return fmt.Errorf("closing map %s: %w", key, err)
+			}
+		}
+
+		return nil
+	}
+
+	finalize := func() {}
+	l.Debug("Pinning maps into bpffs")
+	err = pinAll()
+	if errors.Is(err, ebpf.ErrMapIncompatible) {
+		// Temporarily rename bpffs pins of maps whose definitions have changed in
+		// a new version of a datapath ELF.
+		l.Debug("Starting bpffs map migration")
+		if err := bpf.StartBPFFSMigration(bpf.TCGlobalsPath(), spec); err != nil {
+			revert()
+			return nil, fmt.Errorf("Failed to start bpffs map migration: %w", err)
+		}
+
+		finalize = func() {
+			l.Debug("Finalizing bpffs map migration")
+			if err := bpf.FinalizeBPFFSMigration(bpf.TCGlobalsPath(), spec, false); err != nil {
+				l.WithError(err).Error("Could not finalize bpffs map migration")
+			}
+		}
+
+		// Retry pinning the maps after starting map migration.
+		l.Debug("Retrying pinning maps into bpffs after map migration")
+		err = pinAll()
+	}
+	if err != nil {
+		revert()
+		return nil, fmt.Errorf("pinning eBPF maps into bpffs: %w", err)
+	}
+
+	return finalize, nil
+}
+
 // resolveAndInsertCalls resolves a given slice of ebpf.MapKV containing u32 keys
 // and string values (typical for a prog array) to the Programs they point to in
 // the Collection. The Programs are then inserted into the Map with the given
@@ -296,6 +425,11 @@ func attachProgram(link netlink.Link, prog *ebpf.Program, progName string, qdisc
 		Name:         fmt.Sprintf("%s-%s", progName, link.Attrs().Name),
 		DirectAction: true,
 	}
+
+	if strings.HasPrefix(progName, "raptor") {
+		filter.FilterAttrs.Priority = 1
+	}
+	log.Infof("Attaching %s to %s %v", progName, link.Attrs().Name, strings.HasPrefix(progName, "raptor"))
 
 	if err := netlink.FilterReplace(filter); err != nil {
 		return fmt.Errorf("replacing tc filter: %w", err)
@@ -547,4 +681,80 @@ func addHostDeviceAddr(hostDev netlink.Link, ipv4, ipv6 net.IP) error {
 
 	}
 	return nil
+}
+
+func (l *Loader) reloadRaptorOnLinkChanges() {
+	if !option.Config.EnableRaptor {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	updates := make(chan netlink.LinkUpdate)
+
+	if err := netlink.LinkSubscribe(updates, ctx.Done()); err != nil {
+		log.WithError(err).Fatal("Failed to subscribe for link changes")
+	}
+
+	go func() {
+		defer cancel()
+		for {
+			select {
+			case u, ok := <-updates:
+				if !ok {
+					return
+				}
+				if !isVirtioLink(u) {
+					continue
+				}
+				name := u.Attrs().Name
+				log.WithField(logfields.Device, name).
+					Info("Virtio device changed, reinitializing raptor")
+				if err := l.replaceRaptorDatapath(ctx, false, []string{name}); err != nil {
+					log.WithError(err).
+						WithField(logfields.Device, name).
+						Warn("Failed to reinitialize raptor")
+				}
+			}
+		}
+
+	}()
+}
+
+func isVirtioLink(update netlink.LinkUpdate) bool {
+	if update.Type() != "device" {
+		return false
+	}
+	driver, err := getLinkDriver(update.Attrs().Name)
+	if err != nil {
+		return false
+	}
+
+	if driver == "virtio-pci" || driver == "virtio_net" {
+		addrList, err := netlink.AddrList(update.Link, netlink.FAMILY_V4)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to list addresses with virtio")
+		} else {
+			for _, addr := range addrList {
+				if addr.IPNet.IP.To4().String() == os.Getenv("K8S_NODE_IP") {
+					return false
+				}
+			}
+		}
+
+		return true
+	}
+
+	return false
+}
+
+func getLinkDriver(ifaceName string) (string, error) {
+	driverPath := fmt.Sprintf("/sys/class/net/%s/device/driver", ifaceName)
+	target, err := filepath.EvalSymlinks(driverPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return filepath.Base(target), nil
 }

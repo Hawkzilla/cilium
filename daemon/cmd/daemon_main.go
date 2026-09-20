@@ -1147,6 +1147,10 @@ func initializeFlags() {
 	flags.MarkHidden(option.EnableK8sNetworkPolicy)
 	option.BindEnv(Vp, option.EnableK8sNetworkPolicy)
 
+	flags.Bool(option.EnableRaptor, defaults.EnableRaptor, "Enable Raptor")
+	flags.MarkHidden(option.EnableRaptor)
+	option.BindEnv(Vp, option.EnableRaptor)
+
 	if err := Vp.BindPFlags(flags); err != nil {
 		log.Fatalf("BindPFlags failed: %s", err)
 	}

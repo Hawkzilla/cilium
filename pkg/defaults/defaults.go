@@ -559,6 +559,8 @@ const (
 
 	// EnableEnvoyConfig is the default value for option.EnableEnvoyConfig
 	EnableEnvoyConfig = false
+
+	EnableRaptor = true
 )
 
 var (

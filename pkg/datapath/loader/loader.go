@@ -50,6 +50,9 @@ const (
 	symbolFromOverlay = "cil_from_overlay"
 	symbolToOverlay   = "cil_to_overlay"
 
+	symbolFromTrunk = "raptor_from_trunk"
+	symbolToTrunk   = "raptor_to_trunk"
+
 	dirIngress = "ingress"
 	dirEgress  = "egress"
 )
@@ -383,6 +386,36 @@ func (l *Loader) replaceNetworkDatapath(ctx context.Context, interfaces []string
 			defer finalize()
 		}
 	}
+	return
+}
+
+func (l *Loader) replaceRaptorDatapath(ctx context.Context, firstInitialization bool, interfaces []string) (err error) {
+
+	progs := []progDefinition{
+		{progName: symbolFromTrunk, direction: dirIngress},
+		{progName: symbolToTrunk, direction: dirEgress},
+	}
+
+	if firstInitialization {
+		_, err = pinMaps(ctx, raptorObj, progs)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, iface := range interfaces {
+		finalize, replaceErr := replaceDatapath(ctx, iface, raptorObj, progs, "")
+		if replaceErr != nil {
+			log.WithField(logfields.Interface, iface).WithError(replaceErr).Error("Load encryption network failed")
+			// Return the error to the caller, but keep trying replacing other interfaces.
+			err = replaceErr
+		} else {
+			log.WithField(logfields.Interface, iface).Info("Raptor network program (re)loaded")
+			// Defer map removal until all interfaces' progs have been replaced.
+			defer finalize()
+		}
+	}
+
 	return
 }
 

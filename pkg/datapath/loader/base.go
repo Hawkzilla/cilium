@@ -564,6 +564,47 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 		return err
 	}
 
+	if option.Config.EnableRaptor {
+		if err := compileRaptor(ctx, []string{}); err != nil {
+			log.WithError(err).Fatal("failed to compile bpf_raptor.c")
+		}
+
+		links, err := linkList()
+		if err != nil {
+			return err
+		}
+
+		var interfaces []string
+
+		mainInterface, err := getMainNIC()
+		if err != nil {
+			log.WithError(err).Fatal("failed to get main network interface")
+		}
+
+		for _, link := range links {
+			if link.Type() != "device" || mainInterface == link.Attrs().Name {
+				continue
+			}
+			if driver, err := getLinkDriver(link.Attrs().Name); err != nil {
+				log.WithError(err).WithField("link", link.Attrs().Name).Fatalf("failed to get link driver")
+			} else if driver == "virtio_pci" || driver == "virtio_net" {
+				interfaces = append(interfaces, link.Attrs().Name)
+				log.Infof("found virtio-pci interface %s", link.Attrs().Name)
+			} else {
+				log.Infof("found %s interface %s", link.Attrs().Name, link.Attrs().Name)
+			}
+		}
+
+		if err := l.replaceRaptorDatapath(ctx, firstInitialization, interfaces); err != nil {
+			return err
+		}
+
+		if firstInitialization {
+			// Start a background worker to reinitialize IPsec if links change.
+			l.reloadRaptorOnLinkChanges()
+		}
+	}
+
 	if err := o.Datapath().Node().NodeConfigurationChanged(*o.LocalConfig()); err != nil {
 		return err
 	}
@@ -580,4 +621,24 @@ func (l *Loader) Reinitialize(ctx context.Context, o datapath.BaseProgramOwner, 
 	}
 
 	return nil
+}
+
+func getMainNIC() (string, error) {
+
+	routes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		return "", err
+	}
+	for _, route := range routes {
+		// IPv4 default route: 0.0.0.0/0
+		if route.Dst.String() == "0.0.0.0/0" {
+			link, err := netlink.LinkByIndex(route.LinkIndex)
+			if err != nil {
+				return "", err
+			}
+			return link.Attrs().Name, nil
+		}
+	}
+	return "", fmt.Errorf("default route not found")
+
 }
