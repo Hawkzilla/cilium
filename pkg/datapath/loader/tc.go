@@ -13,6 +13,7 @@ import (
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
+	"github.com/cloudflare/cfssl/log"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -138,6 +139,11 @@ func upsertTCProgram(logger *slog.Logger, device netlink.Link, prog *ebpf.Progra
 		Name:         fmt.Sprintf("%s-%s", progName, device.Attrs().Name),
 		DirectAction: true,
 	}
+
+	if strings.HasPrefix(progName, "raptor") {
+		filter.FilterAttrs.Priority = 1
+	}
+	log.Infof("Attaching %s to %s %v", progName, device.Attrs().Name, strings.HasPrefix(progName, "raptor"))
 
 	if err := netlink.FilterReplace(filter); err != nil {
 		return fmt.Errorf("replacing tc filter for interface %s: %w", device.Attrs().Name, err)

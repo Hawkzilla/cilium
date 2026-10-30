@@ -103,6 +103,17 @@ func (o *wireguardObjects) Close() {
 	bpfClose(o.FromWireguard, o.ToWireguard)
 }
 
+// raptorObjects receives eBPF objects for attaching to Raptor trunk interfaces.
+// Objects originate from bpf_raptor.c.
+type raptorObjects struct {
+	FromTrunk *ebpf.Program `ebpf:"raptor_from_trunk"`
+	ToTrunk   *ebpf.Program `ebpf:"raptor_to_trunk"`
+}
+
+func (o *raptorObjects) Close() {
+	bpfClose(o.FromTrunk, o.ToTrunk)
+}
+
 func bpfClose(closers ...io.Closer) error {
 	for _, closer := range closers {
 		if err := closer.Close(); err != nil {

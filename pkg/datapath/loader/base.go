@@ -476,6 +476,10 @@ func (l *loader) Reinitialize(ctx context.Context, lnc *datapath.LocalNodeConfig
 		return err
 	}
 
+	if err := l.reinitializeRaptor(ctx); err != nil {
+		return err
+	}
+
 	if err := l.nodeConfigNotifier.Notify(*lnc); err != nil {
 		return err
 	}

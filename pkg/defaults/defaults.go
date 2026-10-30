@@ -541,6 +541,9 @@ const (
 
 	// EnableCiliumNodeCRD is the default value for option.EnableCiliumNodeCRD
 	EnableCiliumNodeCRD = true
+
+	// EnableRaptor is the default value for option.EnableRaptor
+	EnableRaptor = true
 )
 
 var (

@@ -83,6 +83,7 @@ type Params struct {
 // newLoader returns a new loader.
 func newLoader(p Params) *loader {
 	registerRouteInitializer(p)
+	registerRaptorLinkWatcher(p)
 	return &loader{
 		logger:             p.Logger,
 		templateCache:      newObjectCache(p.Logger, p.ConfigWriter, filepath.Join(option.Config.StateDir, defaults.TemplatesDir)),
