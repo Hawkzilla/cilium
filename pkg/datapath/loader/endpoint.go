@@ -117,14 +117,14 @@ func (l *loader) Unload(ep datapath.Endpoint) {
 	// Remove legacy tc attachments.
 	link, err := safenetlink.LinkByName(ep.InterfaceName())
 	if err == nil {
-		if err := removeTCFilters(link, netlink.HANDLE_MIN_INGRESS); err != nil {
+		if err := removeTCFilters(log, link, netlink.HANDLE_MIN_INGRESS); err != nil {
 			log.Error(
 				"Failed to remove ingress filter from interface",
 				logfields.Error, err,
 				logfields.Interface, ep.InterfaceName(),
 			)
 		}
-		if err := removeTCFilters(link, netlink.HANDLE_MIN_EGRESS); err != nil {
+		if err := removeTCFilters(log, link, netlink.HANDLE_MIN_EGRESS); err != nil {
 			log.Error(
 				"Failed to remove egress filter from interface",
 				logfields.Error, err,

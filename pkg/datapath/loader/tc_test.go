@@ -94,7 +94,7 @@ func TestPrivilegedAttachDetachTCProgram(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, hasFilters)
 
-		require.NoError(t, removeTCFilters(lo, directionToParent(dirEgress)))
+		require.NoError(t, removeTCFilters(logger, lo, directionToParent(dirEgress)))
 		hasFilters, err = hasCiliumTCFilters(lo, directionToParent(dirEgress))
 		require.NoError(t, err)
 		require.False(t, hasFilters)

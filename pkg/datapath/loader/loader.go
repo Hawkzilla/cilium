@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
@@ -57,6 +58,13 @@ type loader struct {
 	db           *statedb.DB
 	devices      statedb.Table[*tables.Device]
 	routeManager *routeReconciler.DesiredRouteManager
+
+	// raptorMu guards the compile/load state of the Raptor trunk datapath
+	// object (bpf_raptor.o). See loader/raptor.go.
+	raptorMu        lock.Mutex
+	raptorObj       *raptorObjects
+	raptorLoadErr   error
+	raptorNextRetry time.Time
 }
 
 type Params struct {
@@ -83,7 +91,7 @@ type Params struct {
 // newLoader returns a new loader.
 func newLoader(p Params) *loader {
 	registerRouteInitializer(p)
-	return &loader{
+	l := &loader{
 		logger:             p.Logger,
 		templateCache:      newObjectCache(p.Logger, p.ConfigWriter, filepath.Join(option.Config.StateDir, defaults.TemplatesDir)),
 		sysctl:             p.Sysctl,
@@ -97,6 +105,8 @@ func newLoader(p Params) *loader {
 		db:      p.DB,
 		devices: p.Devices,
 	}
+	registerRaptorWatcher(p, l)
+	return l
 }
 
 // CallsMapPath gets the BPF Calls Map for the endpoint with the specified ID.

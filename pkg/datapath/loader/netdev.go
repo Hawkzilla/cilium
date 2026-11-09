@@ -143,7 +143,7 @@ func removeObsoleteNetdevPrograms(logger *slog.Logger, devices []string) error {
 	}
 
 	for _, dev := range ingressDevs {
-		err = removeTCFilters(dev, directionToParent(dirIngress))
+		err = removeTCFilters(logger, dev, directionToParent(dirIngress))
 		if err != nil {
 			logger.Error(
 				"couldn't remove ingress tc filters",
@@ -154,7 +154,7 @@ func removeObsoleteNetdevPrograms(logger *slog.Logger, devices []string) error {
 	}
 
 	for _, dev := range egressDevs {
-		err = removeTCFilters(dev, directionToParent(dirEgress))
+		err = removeTCFilters(logger, dev, directionToParent(dirEgress))
 		if err != nil {
 			logger.Error(
 				"couldn't remove egress tc filters",

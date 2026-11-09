@@ -476,6 +476,12 @@ func (l *loader) Reinitialize(ctx context.Context, lnc *datapath.LocalNodeConfig
 		return err
 	}
 
+	// Re-attach the Raptor trunk programs after the host datapath reload, so
+	// they exist before the agent reports the node as ready (see raptor.go).
+	if err := l.reinitializeRaptor(ctx); err != nil {
+		return err
+	}
+
 	if err := l.nodeConfigNotifier.Notify(*lnc); err != nil {
 		return err
 	}

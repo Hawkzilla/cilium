@@ -45,7 +45,7 @@ func attachSKBProgram(logger *slog.Logger, device netlink.Link, prog *ebpf.Progr
 		err := upsertTCXProgram(logger, device, prog, progName, bpffsDir, parent)
 		if err == nil {
 			// Created tcx link, clean up any leftover legacy tc attachments.
-			if err := removeTCFilters(device, parent); err != nil {
+			if err := removeTCFilters(logger, device, parent); err != nil {
 				logger.Warn(
 					"Cleaning up legacy tc after attaching tcx program",
 					logfields.Error, err,
@@ -107,7 +107,7 @@ func detachSKBProgram(logger *slog.Logger, device netlink.Link, progName, bpffsD
 		return err
 	}
 
-	return removeTCFilters(device, parent)
+	return removeTCFilters(logger, device, parent)
 }
 
 // upsertTCProgram attaches prog to device using a legacy tc bpf filter.
@@ -196,15 +196,40 @@ func removeStaleTCFilters(logger *slog.Logger, device netlink.Link, parent uint3
 	return nil
 }
 
-// removeTCFilters removes all tc filters from the given interface.
+// removeTCFilters removes tc filters from the given interface. Filters
+// belonging to Raptor trunk programs are skipped: they are managed by the
+// Raptor datapath and must never be touched by Cilium's tc lifecycle.
 // Direction is passed as netlink.HANDLE_MIN_{INGRESS,EGRESS} via parent.
-func removeTCFilters(device netlink.Link, parent uint32) error {
+func removeTCFilters(logger *slog.Logger, device netlink.Link, parent uint32) error {
 	filters, err := safenetlink.FilterList(device, parent)
 	if err != nil {
 		return err
 	}
 
 	for _, f := range filters {
+		if bpfFilter, ok := f.(*netlink.BpfFilter); ok {
+			if isRaptorFilter(bpfFilter) {
+				logger.Debug(
+					"Skipping raptor tc bpf filter",
+					logfields.ProgName, bpfFilter.Name,
+					logfields.Device, device.Attrs().Name,
+				)
+				continue
+			}
+
+			if err := netlink.FilterDel(f); err != nil {
+				return err
+			}
+
+			logger.Info(
+				"Deleted tc bpf filter",
+				logfields.ProgName, bpfFilter.Name,
+				logfields.Priority, bpfFilter.Priority,
+				logfields.Device, device.Attrs().Name,
+			)
+			continue
+		}
+
 		if err := netlink.FilterDel(f); err != nil {
 			return err
 		}
@@ -249,6 +274,17 @@ func replaceQdisc(link netlink.Link) error {
 	return netlink.QdiscReplace(qdisc)
 }
 
+// isCiliumFilter returns true if the filter belongs to Cilium's own programs.
 func isCiliumFilter(filter *netlink.BpfFilter) bool {
 	return strings.HasPrefix(filter.Name, "cil_")
+}
+
+// isRaptorFilter returns true for filters belonging to Raptor trunk programs
+// (raptor_from_trunk-*, raptor_to_trunk-*). They are managed by the Raptor
+// datapath integration in loader/raptor.go; Cilium's generic tc cleanup paths
+// must never remove them, e.g. when a trunk interface flaps in and out of the
+// managed device set.
+func isRaptorFilter(filter *netlink.BpfFilter) bool {
+	return strings.HasPrefix(filter.Name, symbolFromTrunk) ||
+		strings.HasPrefix(filter.Name, symbolToTrunk)
 }

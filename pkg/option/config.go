@@ -994,6 +994,9 @@ const (
 
 	// EnableCiliumNodeCRD is the name of the option to enable use of the CiliumNode CRD
 	EnableCiliumNodeCRDName = "enable-ciliumnode-crd"
+
+	// EnableRaptor enables support for Raptor vpc-cni
+	EnableRaptor = "enable-raptor"
 )
 
 // Default string arguments
@@ -1352,6 +1355,9 @@ type DaemonConfig struct {
 	// EnableEncryptionStrictModeEgress enables strict mode for egress traffic.
 	// When enabled, all unencrypted pod-to-pod egress traffic will be dropped.
 	EnableEncryptionStrictModeEgress bool
+
+	// EnableRaptor is the option to enable raptor
+	EnableRaptor bool
 
 	// EncryptionStrictEgressCIDR is the CIDR to use for strict mode egress
 	EncryptionStrictEgressCIDR netip.Prefix
@@ -2487,6 +2493,7 @@ func (c *DaemonConfig) Populate(logger *slog.Logger, vp *viper.Viper) {
 	c.EnablePMTUDiscovery = vp.GetBool(EnablePMTUDiscovery)
 	c.IPv6NAT46x64CIDR = defaults.IPv6NAT46x64CIDR
 	c.IPAMCiliumNodeUpdateRate = vp.GetDuration(IPAMCiliumNodeUpdateRate)
+	c.EnableRaptor = vp.GetBool(EnableRaptor)
 	c.BPFDistributedLRU = vp.GetBool(BPFDistributedLRU)
 	c.BPFEventsDropEnabled = vp.GetBool(BPFEventsDropEnabled)
 	c.BPFEventsPolicyVerdictEnabled = vp.GetBool(BPFEventsPolicyVerdictEnabled)

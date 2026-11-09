@@ -824,6 +824,10 @@ func InitGlobalFlags(logger *slog.Logger, cmd *cobra.Command, vp *viper.Viper) {
 	flags.MarkHidden(option.EnableCiliumNodeCRDName)
 	option.BindEnv(vp, option.EnableCiliumNodeCRDName)
 
+	flags.Bool(option.EnableRaptor, defaults.EnableRaptor, "Enable Raptor")
+	flags.MarkHidden(option.EnableRaptor)
+	option.BindEnv(vp, option.EnableRaptor)
+
 	if err := vp.BindPFlags(flags); err != nil {
 		logging.Fatal(logger, "BindPFlags failed", logfields.Error, err)
 	}

@@ -2286,10 +2286,15 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 	}
 
 	if (ret == CT_NEW) {
-#if defined(ENABLE_NODEPORT) && defined(ENABLE_SRV6)
+#ifdef ENABLE_NODEPORT
+		/* Raptor adds the pod VLAN before to-netdev, where VLAN bypass
+		 * would skip RevDNAT. Mark local NodePort replies so from-lxc
+		 * performs RevDNAT and selects the return interface before the
+		 * packet reaches the trunk egress program.
+		 */
 		ct_state_new.node_port = ct_has_nodeport_egress_entry4(get_ct_map4(tuple),
 								       tuple, NULL, false);
-#endif /* ENABLE_NODEPORT && ENABLE_SRV6 */
+#endif /* ENABLE_NODEPORT */
 		ct_state_new.src_sec_id = src_label;
 		ct_state_new.from_tunnel = from_tunnel;
 		ct_state_new.proxy_redirect = *proxy_port > 0;

@@ -58,6 +58,10 @@ const (
 	wireguardPrefix = "bpf_wireguard"
 	wireguardProg   = wireguardPrefix + "." + string(outputSource)
 	wireguardObj    = wireguardPrefix + ".o"
+
+	raptorPrefix = "bpf_raptor"
+	raptorProg   = raptorPrefix + "." + string(outputSource)
+	raptorObj    = raptorPrefix + ".o"
 )
 
 var (
@@ -419,6 +423,42 @@ func compileWireguard(ctx context.Context, logger *slog.Logger) (err error) {
 	prog := &progInfo{
 		Source:     wireguardProg,
 		Output:     wireguardObj,
+		OutputType: outputObject,
+	}
+	// Write out assembly and preprocessing files for debugging purposes
+	if _, err := compile(ctx, logger, prog, dirs); err != nil {
+		scopedLog.Warn(
+			"Failed to compile",
+			logfields.Error, err,
+			logfields.Params, prog,
+		)
+		return err
+	}
+	return nil
+}
+
+// compileRaptor compiles BPF programs in bpf_raptor.c.
+func compileRaptor(ctx context.Context, logger *slog.Logger) (err error) {
+	dirs := &directoryInfo{
+		Library: option.Config.BpfDir,
+		Runtime: option.Config.StateDir,
+		Output:  option.Config.StateDir,
+		State:   option.Config.StateDir,
+	}
+	scopedLog := logger.With(logfields.Debug, true)
+
+	versionCmd := exec.CommandContext(ctx, compiler, "--version")
+	compilerVersion, err := versionCmd.CombinedOutput(scopedLog, true)
+	if err != nil {
+		return err
+	}
+	scopedLog.Debug(
+		"Compiling raptor programs",
+		compiler, string(compilerVersion),
+	)
+	prog := &progInfo{
+		Source:     raptorProg,
+		Output:     raptorObj,
 		OutputType: outputObject,
 	}
 	// Write out assembly and preprocessing files for debugging purposes
